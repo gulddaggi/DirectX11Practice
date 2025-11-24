@@ -20,8 +20,8 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="Shaders.hlsl">
+    <None Include="Shaders.hlsl">
       <Filter>소스 파일</Filter>
-    </FxCompile>
+    </None>
   </ItemGroup>
 </Project>

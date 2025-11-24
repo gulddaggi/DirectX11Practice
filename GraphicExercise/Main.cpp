@@ -81,7 +81,7 @@ HRESULT InitDevice(HWND hWnd)
 	D3D11_INPUT_ELEMENT_DESC layout[] =
 	{
 		// "POSITION"이라는 이름의 데이터는 -> float 3개(R32G32B32)로 되어 있고 -> 0번 슬롯에서 시작한다.
-		{ "POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 	};
 	UINT numElements = ARRAYSIZE(layout);
 
@@ -99,8 +99,7 @@ HRESULT InitDevice(HWND hWnd)
 	// 3. 픽셀 쉐이더 컴파일 및 생성
 	ID3DBlob* pPSBlob = nullptr;
 	// "PS" 함수를 "ps_4_0" 버전으로 컴파일
-	hr = D3DCompileFromFile(L"Shader.hlsl", nullptr, nullptr, "PS", "ps_4_0", 0, 0, &pPSBlob, nullptr);
-	if (FAILED(hr))
+	hr = D3DCompileFromFile(L"C:\\GitHub\\DirectX11Practice\\GraphicExercise\\Shaders.hlsl", nullptr, nullptr, "PS", "ps_4_0", 0, 0, &pPSBlob, nullptr);	if (FAILED(hr))
 	{
 		return hr;
 	}
@@ -159,6 +158,18 @@ HRESULT InitDevice(HWND hWnd)
 	// 2. 도형의 모양 설정 (Topology)
 	// Triangle List: 점 3개마다 삼각형 하나를 만듦
 	g_pImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+	// 뷰포트(Viewport) 설정
+	// NDC 좌표(-1~1)를 실제 윈도우 픽셀 좌표(0~800, 0~600)로 변환하는 설정
+	D3D11_VIEWPORT vp;
+	vp.Width = 800.0f;
+	vp.Height = 600.0f;
+	vp.MinDepth = 0.0f;
+	vp.MaxDepth = 1.0f;
+	vp.TopLeftX = 0;
+	vp.TopLeftY = 0;
+
+	g_pImmediateContext->RSSetViewports(1, &vp);
 
 	return S_OK;
 }
