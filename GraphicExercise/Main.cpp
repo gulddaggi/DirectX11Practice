@@ -1,4 +1,4 @@
-#include <Windows.h>
+ï»¿#include <Windows.h>
 #include <d3d11.h>
 #include <d3dcompiler.h>
 
@@ -6,7 +6,7 @@
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3dcompiler.lib")
 
-// Àü¿ª º¯¼öµé
+// ì „ì—­ ë³€ìˆ˜ë“¤
 ID3D11Device* g_pd3dDevice = nullptr;
 ID3D11DeviceContext* g_pImmediateContext = nullptr;
 IDXGISwapChain* g_pSwapChain = nullptr;
@@ -16,10 +16,14 @@ ID3D11VertexShader* g_pVertexShader = nullptr;
 ID3D11PixelShader* g_pPixelShader = nullptr;
 ID3D11InputLayout* g_pVertexLayout = nullptr;
 
-// Á¤Á¡ ±¸Á¶Ã¼
+// ì •ì  êµ¬ì¡°ì²´
 struct SimpleVertex
 {
-	float x, y, z; // Position
+	// ìœ„ì¹˜ (x, y, z)
+	float x, y, z;
+
+	// ìƒ‰ìƒ (r, g, b, a)
+	float r, g, b, a;
 };
 
 // Window Procedure
@@ -57,18 +61,18 @@ HRESULT InitDevice(HWND hWnd)
 
 	if (FAILED(hr)) return hr;
 
-	// 1. ¹öÅØ½º ½¦ÀÌ´õ ÄÄÆÄÀÏ ¹× »ý¼º
-	ID3DBlob* pVSBlob = nullptr; // ÄÄÆÄÀÏµÈ ±â°è¾î ÄÚµå¸¦ ´ãÀ» µ¢¾î¸®
+	// 1. ë²„í…ìŠ¤ ì‰ì´ë” ì»´íŒŒì¼ ë° ìƒì„±
+	ID3DBlob* pVSBlob = nullptr; // ì»´íŒŒì¼ëœ ê¸°ê³„ì–´ ì½”ë“œë¥¼ ë‹´ì„ ë©ì–´ë¦¬
 
-	// Shaders.hlsl ÆÄÀÏ¿¡¼­ "VS"¶ó´Â ÇÔ¼ö¸¦ Ã£¾Æ "vs_4_0" ¹öÀüÀ¸·Î ÄÄÆÄÀÏ
+	// Shaders.hlsl íŒŒì¼ì—ì„œ "VS"ë¼ëŠ” í•¨ìˆ˜ë¥¼ ì°¾ì•„ "vs_4_0" ë²„ì „ìœ¼ë¡œ ì»´íŒŒì¼
 	hr = D3DCompileFromFile(L"Shaders.hlsl", nullptr, nullptr, "VS", "vs_4_0", 0, 0, &pVSBlob, nullptr);
 	if (FAILED(hr))
 	{
-		MessageBox(nullptr, L"Shader.hlsl ÆÄÀÏÀ» Ã£À» ¼ö ¾ø°Å³ª ÄÄÆÄÀÏ ¿¡·¯!", L"Error", MB_OK);
+		MessageBox(nullptr, L"Shader.hlsl íŒŒì¼ì„ ì°¾ì„ ìˆ˜ ì—†ê±°ë‚˜ ì»´íŒŒì¼ ì—ëŸ¬!", L"Error", MB_OK);
 		return hr;
 	}
 
-	// ÄÄÆÄÀÏµÈ BlobÀ¸·Î ÁøÂ¥ ½¦ÀÌ´õ °´Ã¼ »ý¼º
+	// ì»´íŒŒì¼ëœ Blobìœ¼ë¡œ ì§„ì§œ ì‰ì´ë” ê°ì²´ ìƒì„±
 	hr = g_pd3dDevice->CreateVertexShader(pVSBlob->GetBufferPointer(), pVSBlob->GetBufferSize(), nullptr, &g_pVertexShader);
 	if (FAILED(hr))
 	{
@@ -76,30 +80,37 @@ HRESULT InitDevice(HWND hWnd)
 		return hr;
 	}
 
-	// 2. ÀÎÇ² ·¹ÀÌ¾Æ¿ô »ý¼º
-	// "C++ÀÇ ±¸Á¶Ã¼ µ¥ÀÌÅÍ°¡ HLSLÀÇ ¾î¶² º¯¼ö¶û ¸ÅÄªµÇ´ÂÁö" ¾Ë·ÁÁÖ´Â Á¤ÀÇ
+	// 2. ì¸í’‹ ë ˆì´ì•„ì›ƒ ìƒì„±
+	// "C++ì˜ êµ¬ì¡°ì²´ ë°ì´í„°ê°€ HLSLì˜ ì–´ë–¤ ë³€ìˆ˜ëž‘ ë§¤ì¹­ë˜ëŠ”ì§€" ì•Œë ¤ì£¼ëŠ” ì •ì˜
 	D3D11_INPUT_ELEMENT_DESC layout[] =
 	{
-		// "POSITION"ÀÌ¶ó´Â ÀÌ¸§ÀÇ µ¥ÀÌÅÍ´Â -> float 3°³(R32G32B32)·Î µÇ¾î ÀÖ°í -> 0¹ø ½½·Ô¿¡¼­ ½ÃÀÛÇÑ´Ù.
+		// 1. ìœ„ì¹˜ ì •ë³´
+		// "POSITION"ì´ë¼ëŠ” ì´ë¦„ì˜ ë°ì´í„°ëŠ” -> float 3ê°œ(R32G32B32)ë¡œ ë˜ì–´ ìžˆê³  -> 0ë²ˆ ìŠ¬ë¡¯ì—ì„œ ì‹œìž‘í•œë‹¤.
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+
+		// 2. ìƒ‰ìƒ ì •ë³´
+		// "COLOR"ë¼ëŠ” ì´ë¦„í‘œë¥¼ ë‹¬ê³ , float4(128ë¹„íŠ¸) í¬ê¸°ì´ë©°,
+		// ìœ„ì¹˜ ë°ì´í„°(12ë°”ì´íŠ¸)ê°€ ëë‚˜ëŠ” ì§€ì (AlignedByteOffset)ë¶€í„° ì‹œìž‘í•œë‹¤.
+		{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 	};
 	UINT numElements = ARRAYSIZE(layout);
 
-	// ½¦ÀÌ´õ ÄÚµå(VSBlob)¸¦ º¸°í ·¹ÀÌ¾Æ¿ôÀÌ ¸Â´ÂÁö °ËÁõÇÏ¸ç »ý¼º
+	// ì‰ì´ë” ì½”ë“œ(VSBlob)ë¥¼ ë³´ê³  ë ˆì´ì•„ì›ƒì´ ë§žëŠ”ì§€ ê²€ì¦í•˜ë©° ìƒì„±
 	hr = g_pd3dDevice->CreateInputLayout(layout, numElements, pVSBlob->GetBufferPointer(), pVSBlob->GetBufferSize(), &g_pVertexLayout);
-	pVSBlob->Release(); // ½¦ÀÌ´õ ¸¸µé¾úÀ¸´Ï BlobÀº ÇØÁ¦
+	pVSBlob->Release(); // ì‰ì´ë” ë§Œë“¤ì—ˆìœ¼ë‹ˆ Blobì€ í•´ì œ
 	if (FAILED(hr))
 	{
 		return hr;
 	}
 
-	// »ý¼ºÇÑ ·¹ÀÌ¾Æ¿ôÀ» ÆÄÀÌÇÁ¶óÀÎ¿¡ ÀåÂø
+	// ìƒì„±í•œ ë ˆì´ì•„ì›ƒì„ íŒŒì´í”„ë¼ì¸ì— ìž¥ì°©
 	g_pImmediateContext->IASetInputLayout(g_pVertexLayout);
 
-	// 3. ÇÈ¼¿ ½¦ÀÌ´õ ÄÄÆÄÀÏ ¹× »ý¼º
+	// 3. í”½ì…€ ì‰ì´ë” ì»´íŒŒì¼ ë° ìƒì„±
 	ID3DBlob* pPSBlob = nullptr;
-	// "PS" ÇÔ¼ö¸¦ "ps_4_0" ¹öÀüÀ¸·Î ÄÄÆÄÀÏ
-	hr = D3DCompileFromFile(L"C:\\GitHub\\DirectX11Practice\\GraphicExercise\\Shaders.hlsl", nullptr, nullptr, "PS", "ps_4_0", 0, 0, &pPSBlob, nullptr);	if (FAILED(hr))
+	// "PS" í•¨ìˆ˜ë¥¼ "ps_4_0" ë²„ì „ìœ¼ë¡œ ì»´íŒŒì¼
+	hr = D3DCompileFromFile(L"Shaders.hlsl", nullptr, nullptr, "PS", "ps_4_0", 0, 0, &pPSBlob, nullptr);
+	if (FAILED(hr))
 	{
 		return hr;
 	}
@@ -120,47 +131,48 @@ HRESULT InitDevice(HWND hWnd)
 	// Set render target
 	g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView, nullptr);
 
-	// »ï°¢Çü µ¥ÀÌÅÍ Á¤ÀÇ (ClockWise)
+	// ì‚¼ê°í˜• ë°ì´í„° ì •ì˜ (ClockWise)
 	SimpleVertex vertices[] =
 	{
-		{0.0f, 0.5f, 0.5f}, //Top
-		{0.5f, -0.5f, 0.5f}, // Bottom Right
-		{-0.5f, -0.5f, 0.5f}, // Bottom Left
+		// x, y, z,           r, g, b, a
+		{0.0f, 0.5f, 0.5f, 1.0f, 0.0f, 0.0f, 1.0f }, // ìœ„ìª½: ë¹¨ê°•
+		{0.5f, -0.5f, 0.5f, 0.0f, 1.0f, 0.0f, 1.0f }, // ìš°í•˜ë‹¨: ì´ˆë¡
+		{-0.5f, -0.5f, 0.5f, 0.0f, 0.0f, 1.0f, 1.0f }, // ì¢Œí•˜ë‹¨: íŒŒëž‘
 	};
 
-	// 1. Á¤Á¡ ¹öÆÛ »ý¼º
+	// 1. ì •ì  ë²„í¼ ìƒì„±
 	D3D11_BUFFER_DESC bd = {};
 	bd.Usage = D3D11_USAGE_DEFAULT;
 	bd.ByteWidth = sizeof(SimpleVertex) * 3; // Buffer size
 	bd.BindFlags = D3D11_BIND_VERTEX_BUFFER; 
 	bd.CPUAccessFlags = 0;
 
-	// 2. ÃÊ±â µ¥ÀÌÅÍ ÁöÁ¤
+	// 2. ì´ˆê¸° ë°ì´í„° ì§€ì •
 	D3D11_SUBRESOURCE_DATA InitData = {};
 	InitData.pSysMem = vertices;
 
-	// 3. ¹öÆÛ »ý¼º 
+	// 3. ë²„í¼ ìƒì„± 
 	hr = g_pd3dDevice->CreateBuffer(&bd, &InitData, &g_pVertexBuffer);
 	if (FAILED(hr)) return hr;
 
-	// 1. Á¤Á¡ ¹öÆÛ¸¦ ÆÄÀÌÇÁ¶óÀÎ(Input Assembler)¿¡ ¹­±â
-	UINT stride = sizeof(SimpleVertex); // Á¤Á¡ 1°³ÀÇ Å©±â
-	UINT offset = 0; // Ã³À½ºÎÅÍ ÀÐ±â
+	// 1. ì •ì  ë²„í¼ë¥¼ íŒŒì´í”„ë¼ì¸(Input Assembler)ì— ë¬¶ê¸°
+	UINT stride = sizeof(SimpleVertex); // ì •ì  1ê°œì˜ í¬ê¸°
+	UINT offset = 0; // ì²˜ìŒë¶€í„° ì½ê¸°
 
 	g_pImmediateContext->IASetVertexBuffers(
-		0,                  // ½½·Ô ¹øÈ£ (º¸Åë 0¹ø)
-		1,                  // ¹öÆÛ °³¼ö
-		&g_pVertexBuffer,   // ¹öÆÛ ÁÖ¼Ò
-		&stride,            // º¸Æø (Stride)
-		&offset             // ¿ÀÇÁ¼Â
+		0,                  // ìŠ¬ë¡¯ ë²ˆí˜¸ (ë³´í†µ 0ë²ˆ)
+		1,                  // ë²„í¼ ê°œìˆ˜
+		&g_pVertexBuffer,   // ë²„í¼ ì£¼ì†Œ
+		&stride,            // ë³´í­ (Stride)
+		&offset             // ì˜¤í”„ì…‹
 	);
 
-	// 2. µµÇüÀÇ ¸ð¾ç ¼³Á¤ (Topology)
-	// Triangle List: Á¡ 3°³¸¶´Ù »ï°¢Çü ÇÏ³ª¸¦ ¸¸µê
+	// 2. ë„í˜•ì˜ ëª¨ì–‘ ì„¤ì • (Topology)
+	// Triangle List: ì  3ê°œë§ˆë‹¤ ì‚¼ê°í˜• í•˜ë‚˜ë¥¼ ë§Œë“¦
 	g_pImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-	// ºäÆ÷Æ®(Viewport) ¼³Á¤
-	// NDC ÁÂÇ¥(-1~1)¸¦ ½ÇÁ¦ À©µµ¿ì ÇÈ¼¿ ÁÂÇ¥(0~800, 0~600)·Î º¯È¯ÇÏ´Â ¼³Á¤
+	// ë·°í¬íŠ¸(Viewport) ì„¤ì •
+	// NDC ì¢Œí‘œ(-1~1)ë¥¼ ì‹¤ì œ ìœˆë„ìš° í”½ì…€ ì¢Œí‘œ(0~800, 0~600)ë¡œ ë³€í™˜í•˜ëŠ” ì„¤ì •
 	D3D11_VIEWPORT vp;
 	vp.Width = 800.0f;
 	vp.Height = 600.0f;
@@ -177,18 +189,18 @@ HRESULT InitDevice(HWND hWnd)
 // Render
 void Render()
 {
-	// 1. È­¸é Áö¿ì±â (ÆÄ¶õ»ö)
+	// 1. í™”ë©´ ì§€ìš°ê¸° (íŒŒëž€ìƒ‰)
 	float ClearColor[4] = { 0.0f, 0.125f, 0.6f, 1.0f };
 	g_pImmediateContext->ClearRenderTargetView(g_pRenderTargetView, ClearColor);
 
-	// 2. ½¦ÀÌ´õ ÀåÂø (¹öÅØ½º ½¦ÀÌ´õ, ÇÈ¼¿ ½¦ÀÌ´õ)
+	// 2. ì‰ì´ë” ìž¥ì°© (ë²„í…ìŠ¤ ì‰ì´ë”, í”½ì…€ ì‰ì´ë”)
 	g_pImmediateContext->VSSetShader(g_pVertexShader, nullptr, 0);
 	g_pImmediateContext->PSSetShader(g_pPixelShader, nullptr, 0);
 
-	// 3. ±×¸®±â ¸í·É (Draw)
+	// 3. ê·¸ë¦¬ê¸° ëª…ë ¹ (Draw)
 	g_pImmediateContext->Draw(3, 0);
 
-	// 4. È­¸é Ãâ·Â
+	// 4. í™”ë©´ ì¶œë ¥
 	g_pSwapChain->Present(0, 0);
 }
 
@@ -211,7 +223,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int)
 	// Create Window and assign(Basic Win32 API)
 	WNDCLASSEX wc = { sizeof(WNDCLASSEX), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(NULL), NULL, NULL, NULL, NULL, L"DX11Win", NULL };
 	RegisterClassEx(&wc);
-	HWND hWnd = CreateWindow(L"DX11Win", L"DirectX 11 Tutorial 01", WS_OVERLAPPEDWINDOW, 100, 100, 800, 600, NULL, NULL, wc.hInstance, NULL);
+	HWND hWnd = CreateWindow(L"DX11Win", L"DirectX 11 Tutorial 02", WS_OVERLAPPEDWINDOW, 100, 100, 800, 600, NULL, NULL, wc.hInstance, NULL);
 
 	//Init DirectX
 	if (FAILED(InitDevice(hWnd)))
