@@ -1,6 +1,7 @@
 ﻿#include <Windows.h>
 #include <d3d11.h>
 #include <d3dcompiler.h>
+#include <string>
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -15,6 +16,7 @@ ID3D11Buffer* g_pVertexBuffer = nullptr;
 ID3D11VertexShader* g_pVertexShader = nullptr;
 ID3D11PixelShader* g_pPixelShader = nullptr;
 ID3D11InputLayout* g_pVertexLayout = nullptr;
+ID3D11Buffer* g_pIndexBuffer = nullptr;
 
 // 정점 구조체
 struct SimpleVertex
@@ -25,6 +27,23 @@ struct SimpleVertex
 	// 색상 (r, g, b, a)
 	float r, g, b, a;
 };
+
+std::wstring GetShaderPath()
+{
+	WCHAR buffer[MAX_PATH];
+	GetModuleFileName(NULL, buffer, MAX_PATH); // 현재 실행 파일(.exe)의 전체 경로를 가져옴
+	std::wstring path = buffer;
+
+	// 1. 실행 파일 이름 제거 (GraphicExercise.exe)
+	path = path.substr(0, path.find_last_of(L"\\/"));
+
+	// 2. 만약 Shaders.hlsl이 바로 옆에 있으면 리턴
+	if (GetFileAttributes((path + L"\\Shaders.hlsl").c_str()) != INVALID_FILE_ATTRIBUTES)
+		return path + L"\\Shaders.hlsl";
+
+	// 소스 코드 경로를 직접 반환.
+	return L"Shaders.hlsl";
+}
 
 // Window Procedure
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -63,6 +82,34 @@ HRESULT InitDevice(HWND hWnd)
 
 	// 1. 버텍스 쉐이더 컴파일 및 생성
 	ID3DBlob* pVSBlob = nullptr; // 컴파일된 기계어 코드를 담을 덩어리
+	ID3DBlob* pErrorBlob = nullptr; // 에러 메시지를 받을 변수
+
+	// 컴파일 시도
+	DWORD flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_DEBUG; // 디버그 정보 포함
+	hr = D3DCompileFromFile(
+		L"Shaders.hlsl",      // 파일 경로
+		nullptr, nullptr,
+		"VS", "vs_4_0",       // 함수 이름, 버전
+		flags, 0,
+		&pVSBlob,
+		&pErrorBlob           // [NEW] 에러 내용을 여기에 담아옴
+	);
+
+	if (FAILED(hr))
+	{
+		if (pErrorBlob)
+		{
+			// 컴파일 에러인 경우 (오타 등)
+			MessageBoxA(nullptr, (char*)pErrorBlob->GetBufferPointer(), "Shader Compile Error", MB_OK);
+			pErrorBlob->Release();
+		}
+		else
+		{
+			// 파일 자체가 없는 경우
+			MessageBox(nullptr, L"Shaders.hlsl 파일을 찾을 수 없습니다.\n(Main.cpp와 같은 폴더에 있나요?)", L"File Not Found", MB_OK);
+		}
+		return hr;
+	}
 
 	// Shaders.hlsl 파일에서 "VS"라는 함수를 찾아 "vs_4_0" 버전으로 컴파일
 	hr = D3DCompileFromFile(L"Shaders.hlsl", nullptr, nullptr, "VS", "vs_4_0", 0, 0, &pVSBlob, nullptr);
@@ -131,19 +178,20 @@ HRESULT InitDevice(HWND hWnd)
 	// Set render target
 	g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView, nullptr);
 
-	// 삼각형 데이터 정의 (ClockWise)
+	// 사각형을 위한 점 4개
 	SimpleVertex vertices[] =
 	{
-		// x, y, z,           r, g, b, a
-		{0.0f, 0.5f, 0.5f, 1.0f, 0.0f, 0.0f, 1.0f }, // 위쪽: 빨강
-		{0.5f, -0.5f, 0.5f, 0.0f, 1.0f, 0.0f, 1.0f }, // 우하단: 초록
-		{-0.5f, -0.5f, 0.5f, 0.0f, 0.0f, 1.0f, 1.0f }, // 좌하단: 파랑
+		{ -0.5f,  0.5f, 0.5f, 1.0f, 0.0f, 0.0f, 1.0f }, // 0번: 좌상단 (빨강)
+		{  0.5f,  0.5f, 0.5f, 0.0f, 1.0f, 0.0f, 1.0f }, // 1번: 우상단 (초록)
+		{  0.5f, -0.5f, 0.5f, 0.0f, 0.0f, 1.0f, 1.0f }, // 2번: 우하단 (파랑)
+		{ -0.5f, -0.5f, 0.5f, 1.0f, 1.0f, 0.0f, 1.0f }, // 3번: 좌하단 (노랑)
 	};
 
+	// 정점 버퍼
 	// 1. 정점 버퍼 생성
 	D3D11_BUFFER_DESC bd = {};
 	bd.Usage = D3D11_USAGE_DEFAULT;
-	bd.ByteWidth = sizeof(SimpleVertex) * 3; // Buffer size
+	bd.ByteWidth = sizeof(vertices); // Buffer size
 	bd.BindFlags = D3D11_BIND_VERTEX_BUFFER; 
 	bd.CPUAccessFlags = 0;
 
@@ -155,7 +203,7 @@ HRESULT InitDevice(HWND hWnd)
 	hr = g_pd3dDevice->CreateBuffer(&bd, &InitData, &g_pVertexBuffer);
 	if (FAILED(hr)) return hr;
 
-	// 1. 정점 버퍼를 파이프라인(Input Assembler)에 묶기
+	// 4. 정점 버퍼를 파이프라인(Input Assembler)에 묶기
 	UINT stride = sizeof(SimpleVertex); // 정점 1개의 크기
 	UINT offset = 0; // 처음부터 읽기
 
@@ -167,9 +215,35 @@ HRESULT InitDevice(HWND hWnd)
 		&offset             // 오프셋
 	);
 
-	// 2. 도형의 모양 설정 (Topology)
-	// Triangle List: 점 3개마다 삼각형 하나를 만듦
+	// 5. 도형의 모양 설정 (Topology)
+	// Topology 설정: 정점들을 이어 삼각형 리스트로 해석 (인덱스 버퍼가 이를 참조하여 사각형 구성)
 	g_pImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+	// 인덱스 버퍼
+	// 1. 인덱스 배열. 시계방향으로 삼각형 2개 정의
+	WORD indices[] =
+	{
+		0, 1, 2, // 첫 번째 삼각형 (좌상 -> 우상 -> 우하)
+		0, 2, 3, // 두 번째 삼각형 (좌상 -> 우하 -> 좌하)
+	};
+
+	D3D11_BUFFER_DESC ibd = {};
+	ibd.Usage = D3D11_USAGE_DEFAULT;
+	ibd.ByteWidth = sizeof(WORD) * 6; // 2바이트(WORD) * 6개
+	ibd.BindFlags = D3D11_BIND_INDEX_BUFFER; // 인덱스 버퍼 용도
+	ibd.CPUAccessFlags = 0;
+
+	D3D11_SUBRESOURCE_DATA iinitData = {};
+	iinitData.pSysMem = indices;
+
+	hr = g_pd3dDevice->CreateBuffer(&ibd, &iinitData, &g_pIndexBuffer);
+	if (FAILED(hr))
+	{
+		return hr;
+	}
+
+	// 인덱스 버퍼를 파이프라인에 묶기 (Bind)
+	g_pImmediateContext->IASetIndexBuffer(g_pIndexBuffer, DXGI_FORMAT_R16_UINT, 0);
 
 	// 뷰포트(Viewport) 설정
 	// NDC 좌표(-1~1)를 실제 윈도우 픽셀 좌표(0~800, 0~600)로 변환하는 설정
@@ -198,7 +272,12 @@ void Render()
 	g_pImmediateContext->PSSetShader(g_pPixelShader, nullptr, 0);
 
 	// 3. 그리기 명령 (Draw)
-	g_pImmediateContext->Draw(3, 0);
+	
+	// 기존 코드 삭제
+	// g_pImmediateContext->Draw(3, 0);
+
+	// 총 6개의 인덱스(점)를 사용해서 그려라
+	g_pImmediateContext->DrawIndexed(6, 0, 0);
 
 	// 4. 화면 출력
 	g_pSwapChain->Present(0, 0);
@@ -215,6 +294,7 @@ void CleanupDevice()
 	if (g_pVertexShader) g_pVertexShader->Release();
 	if (g_pPixelShader) g_pPixelShader->Release();
 	if (g_pVertexLayout) g_pVertexLayout->Release();
+	if (g_pIndexBuffer) g_pIndexBuffer->Release();
 }
 
 // main
@@ -223,7 +303,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int)
 	// Create Window and assign(Basic Win32 API)
 	WNDCLASSEX wc = { sizeof(WNDCLASSEX), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(NULL), NULL, NULL, NULL, NULL, L"DX11Win", NULL };
 	RegisterClassEx(&wc);
-	HWND hWnd = CreateWindow(L"DX11Win", L"DirectX 11 Tutorial 02", WS_OVERLAPPEDWINDOW, 100, 100, 800, 600, NULL, NULL, wc.hInstance, NULL);
+	HWND hWnd = CreateWindow(L"DX11Win", L"DirectX 11 Tutorial 03", WS_OVERLAPPEDWINDOW, 100, 100, 800, 600, NULL, NULL, wc.hInstance, NULL);
 
 	//Init DirectX
 	if (FAILED(InitDevice(hWnd)))
