@@ -27,3 +27,11 @@ DirectX 11 그래픽스 파이프라인의 기초부터 심화까지 단계별�
   <img src="./assets/images/chap03.png" width="600">
 
 ---
+
+### Chapter 04: 행렬 변환 (Matrix Transformations)
+
+- **학습 내용**: 월드/뷰/프로젝션(WVP) 행렬의 개념, 상수 버퍼(Constant Buffer)를 통한 CPU-GPU 데이터 공유, `DirectXMath` 라이브러리 활용
+- **결과**: Y축으로 회전하는 3D 사각형 (Back-face Culling 비활성화)
+  <img src="./assets/images/chap04.gif" width="600">
+
+---

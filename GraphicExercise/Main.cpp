@@ -2,10 +2,13 @@
 #include <d3d11.h>
 #include <d3dcompiler.h>
 #include <string>
+#include <DirectXMath.h>
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3dcompiler.lib")
+
+using namespace DirectX;
 
 // 전역 변수들
 ID3D11Device* g_pd3dDevice = nullptr;
@@ -17,6 +20,11 @@ ID3D11VertexShader* g_pVertexShader = nullptr;
 ID3D11PixelShader* g_pPixelShader = nullptr;
 ID3D11InputLayout* g_pVertexLayout = nullptr;
 ID3D11Buffer* g_pIndexBuffer = nullptr;
+ID3D11Buffer* g_pConstantBuffer = nullptr;
+
+XMMATRIX g_World;
+XMMATRIX g_View;
+XMMATRIX g_Projection;
 
 // 정점 구조체
 struct SimpleVertex
@@ -26,6 +34,14 @@ struct SimpleVertex
 
 	// 색상 (r, g, b, a)
 	float r, g, b, a;
+};
+
+// 상수 버퍼 구조체 (CPU 쪽 정의)
+struct ConstantBuffer
+{
+	XMMATRIX mWorld; // 월드 행렬 (물체의 위치/회전)
+	XMMATRIX mView; // 뷰 행렬 (카메라의 위치)
+	XMMATRIX mProjection; // 프로젝션 행렬 (원근감)
 };
 
 std::wstring GetShaderPath()
@@ -257,21 +273,92 @@ HRESULT InitDevice(HWND hWnd)
 
 	g_pImmediateContext->RSSetViewports(1, &vp);
 
+	// 상수 버퍼
+	// 상수 버퍼 생성
+	D3D11_BUFFER_DESC cbd = {};
+	cbd.Usage = D3D11_USAGE_DEFAULT;
+	cbd.ByteWidth = sizeof(ConstantBuffer); // 크기는 구조체 크기만큼
+	cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER; // 용도는 상수 버퍼
+	cbd.CPUAccessFlags = 0;
+
+	// 초기값 없이 껍데기만 (나중에 Render에서 채울 예정)
+	hr = g_pd3dDevice->CreateBuffer(&cbd, nullptr, &g_pConstantBuffer);
+	if (FAILED(hr)) return hr;
+
+	// 행렬 초기화 (카메라 세팅)
+	// 1. 월드 행렬: 단위 행렬
+	g_World = XMMatrixIdentity();
+
+	// 2. 뷰 행렬: 카메라 위치 설정
+	// Eye: 카메라 위치 (0, 0, -3) -> Z축 뒤로 3칸 물러남
+	// At:  바라보는 곳 (0, 0, 0)  -> 원점을 바라봄
+	// Up:  천장 방향   (0, 1, 0)  -> Y축이 위쪽
+	XMVECTOR Eye = XMVectorSet(0.0f, 0.0f, -3.0f, 0.0f);
+	XMVECTOR At = XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f);
+	XMVECTOR Up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+	g_View = XMMatrixLookAtLH(Eye, At, Up);
+
+	// 3. 프로젝션 행렬: 렌즈 세팅 (원근감)
+	// FOV(시야각): 90도 (XM_PIDIV2)
+	// 화면 비율: 800 / 600
+	// Near: 0.01 (이보다 가까우면 안 그림)
+	// Far: 100.0 (이보다 멀면 안 그림)
+	g_Projection = XMMatrixPerspectiveFovLH(XM_PIDIV2, 800.0f / 600.0f, 0.01f, 100.0f);
+
+	// 래스터라이저 스테이트 설정 (CullMode 비활성화)
+	D3D11_RASTERIZER_DESC wfdesc = {};
+	wfdesc.FillMode = D3D11_FILL_SOLID; // 채우기 모드
+	wfdesc.CullMode = D3D11_CULL_NONE; // 컬링 비활성화
+	wfdesc.FrontCounterClockwise = false;
+
+	ID3D11RasterizerState* pRasterizerState = nullptr;
+	hr = g_pd3dDevice->CreateRasterizerState(&wfdesc, &pRasterizerState);
+	if (FAILED(hr)) return hr;
+
+	g_pImmediateContext->RSSetState(pRasterizerState);
+	pRasterizerState->Release();
+
 	return S_OK;
 }
 
 // Render
 void Render()
 {
-	// 1. 화면 지우기 (파란색)
+	// 화면 지우기 (파란색)
 	float ClearColor[4] = { 0.0f, 0.125f, 0.6f, 1.0f };
 	g_pImmediateContext->ClearRenderTargetView(g_pRenderTargetView, ClearColor);
 
-	// 2. 쉐이더 장착 (버텍스 쉐이더, 픽셀 쉐이더)
+	// 월드 행렬 업데이트 (회전)
+	// 시간에 따라 각도를 계속 증가
+	static float t = 0.0f;
+	if (g_pd3dDevice->GetFeatureLevel() == D3D_FEATURE_LEVEL_11_1)
+		t += 0.00f; // 좀 더 빠르게
+	else
+		t += 0.0005f;
+
+	// Y축을 기준으로 t만큼 회전하는 행렬 생성
+	g_World = XMMatrixRotationY(t);
+
+	// 상수 버퍼 업데이트 (CPU -> GPU)
+	ConstantBuffer cb;
+	// 행렬 Transpose (전치)
+	// DirectXMath(CPU)는 행 우선(Row-Major), HLSL(GPU)은 열 우선(Column-Major).
+	// 그래서 보내기 전에 행렬을 뒤집어(Transpose) 줘야 쉐이더가 똑바로 읽는다.
+	cb.mWorld = XMMatrixTranspose(g_World);
+	cb.mView = XMMatrixTranspose(g_View);
+	cb.mProjection = XMMatrixTranspose(g_Projection);
+
+	// GPU에 있는 상수 버퍼 메모리 갱신
+	g_pImmediateContext->UpdateSubresource(g_pConstantBuffer, 0, nullptr, &cb, 0, 0);
+
+	// 버텍스 쉐이더 단계에 상수 버퍼 연결 (슬롯 0번)
+	g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pConstantBuffer);
+
+	// 쉐이더 장착 (버텍스 쉐이더, 픽셀 쉐이더)
 	g_pImmediateContext->VSSetShader(g_pVertexShader, nullptr, 0);
 	g_pImmediateContext->PSSetShader(g_pPixelShader, nullptr, 0);
 
-	// 3. 그리기 명령 (Draw)
+	// 그리기 명령 (Draw)
 	
 	// 기존 코드 삭제
 	// g_pImmediateContext->Draw(3, 0);
@@ -295,6 +382,7 @@ void CleanupDevice()
 	if (g_pPixelShader) g_pPixelShader->Release();
 	if (g_pVertexLayout) g_pVertexLayout->Release();
 	if (g_pIndexBuffer) g_pIndexBuffer->Release();
+	if (g_pConstantBuffer) g_pConstantBuffer->Release();
 }
 
 // main
@@ -303,7 +391,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int)
 	// Create Window and assign(Basic Win32 API)
 	WNDCLASSEX wc = { sizeof(WNDCLASSEX), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(NULL), NULL, NULL, NULL, NULL, L"DX11Win", NULL };
 	RegisterClassEx(&wc);
-	HWND hWnd = CreateWindow(L"DX11Win", L"DirectX 11 Tutorial 03", WS_OVERLAPPEDWINDOW, 100, 100, 800, 600, NULL, NULL, wc.hInstance, NULL);
+	HWND hWnd = CreateWindow(L"DX11Win", L"DirectX 11 Tutorial 04", WS_OVERLAPPEDWINDOW, 100, 100, 800, 600, NULL, NULL, wc.hInstance, NULL);
 
 	//Init DirectX
 	if (FAILED(InitDevice(hWnd)))
