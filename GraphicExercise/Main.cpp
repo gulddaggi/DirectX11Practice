@@ -21,6 +21,8 @@ ID3D11PixelShader* g_pPixelShader = nullptr;
 ID3D11InputLayout* g_pVertexLayout = nullptr;
 ID3D11Buffer* g_pIndexBuffer = nullptr;
 ID3D11Buffer* g_pConstantBuffer = nullptr;
+ID3D11Texture2D* g_pDepthStencil = nullptr;
+ID3D11DepthStencilView* g_pDepthStencilView = nullptr;
 
 XMMATRIX g_World;
 XMMATRIX g_View;
@@ -191,16 +193,47 @@ HRESULT InitDevice(HWND hWnd)
 	g_pd3dDevice->CreateRenderTargetView(pBackBuffer, nullptr, &g_pRenderTargetView);
 	pBackBuffer->Release(); // Release backbuffer pointer
 
-	// Set render target
-	g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView, nullptr);
+	// 깊이 버퍼 생성
+	// 1. 깊이 텍스처 생성
+	D3D11_TEXTURE2D_DESC descDepth = {};
+	descDepth.Width = 800;
+	descDepth.Height = 600;
+	descDepth.MipLevels = 1;
+	descDepth.ArraySize = 1;
+	descDepth.Format = DXGI_FORMAT_D24_UNORM_S8_UINT; // 24비트 Depth, 8비트 Stencil
+	descDepth.SampleDesc.Count = 1;
+	descDepth.SampleDesc.Quality = 0;
+	descDepth.Usage = D3D11_USAGE_DEFAULT;
+	descDepth.BindFlags = D3D11_BIND_DEPTH_STENCIL; // 깊이 버퍼 용도
+	descDepth.CPUAccessFlags = 0;
+	descDepth.MiscFlags = 0;
 
-	// 사각형을 위한 점 4개
+	hr = g_pd3dDevice->CreateTexture2D(&descDepth, nullptr, &g_pDepthStencil);
+	if (FAILED(hr)) return hr;
+
+	// 2. 깊이 스텐실 뷰(DSV) 생성
+	D3D11_DEPTH_STENCIL_VIEW_DESC descDSV = {};
+	descDSV.Format = descDepth.Format;
+	descDSV.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+	descDSV.Texture2D.MipSlice = 0;
+
+	hr = g_pd3dDevice->CreateDepthStencilView(g_pDepthStencil, &descDSV, &g_pDepthStencilView);
+	if (FAILED(hr)) return hr;
+
+	// 3. 렌더 타겟과 깊이 버퍼를 파이프라인에 연결(기존 코드 수정)
+	g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView, g_pDepthStencilView);
+
+	// 1. 큐브 정점 (8개)
 	SimpleVertex vertices[] =
 	{
-		{ -0.5f,  0.5f, 0.5f, 1.0f, 0.0f, 0.0f, 1.0f }, // 0번: 좌상단 (빨강)
-		{  0.5f,  0.5f, 0.5f, 0.0f, 1.0f, 0.0f, 1.0f }, // 1번: 우상단 (초록)
-		{  0.5f, -0.5f, 0.5f, 0.0f, 0.0f, 1.0f, 1.0f }, // 2번: 우하단 (파랑)
-		{ -0.5f, -0.5f, 0.5f, 1.0f, 1.0f, 0.0f, 1.0f }, // 3번: 좌하단 (노랑)
+		{ -1.0f, 1.0f, -1.0f, 0.0f, 0.0f, 1.0f, 1.0f }, // 0. 좌상단 앞 (파랑)
+		{ 1.0f, 1.0f, -1.0f, 0.0f, 1.0f, 0.0f, 1.0f },  // 1. 우상단 앞 (초록)
+		{ 1.0f, 1.0f, 1.0f, 0.0f, 1.0f, 1.0f, 1.0f },   // 2. 우상단 뒤 (청록)
+		{ -1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f },  // 3. 좌상단 뒤 (빨강)
+		{ -1.0f, -1.0f, -1.0f, 1.0f, 0.0f, 1.0f, 1.0f },// 4. 좌하단 앞 (보라)
+		{ 1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 0.0f, 1.0f }, // 5. 우하단 앞 (노랑)
+		{ 1.0f, -1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f },  // 6. 우하단 뒤 (흰색)
+		{ -1.0f, -1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f }, // 7. 좌하단 뒤 (검정)
 	};
 
 	// 정점 버퍼
@@ -236,16 +269,20 @@ HRESULT InitDevice(HWND hWnd)
 	g_pImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
 	// 인덱스 버퍼
-	// 1. 인덱스 배열. 시계방향으로 삼각형 2개 정의
+	// 큐브 인덱스 (삼각형 12개 = 인덱스 36개)
 	WORD indices[] =
 	{
-		0, 1, 2, // 첫 번째 삼각형 (좌상 -> 우상 -> 우하)
-		0, 2, 3, // 두 번째 삼각형 (좌상 -> 우하 -> 좌하)
+		3,1,0, 2,1,3, // 윗면
+		0,5,4, 1,5,0, // 앞면
+		3,4,7, 0,4,3, // 왼쪽면
+		1,6,5, 2,6,1, // 오른쪽면
+		2,7,6, 3,7,2, // 뒷면
+		6,4,5, 7,4,6, // 아랫면
 	};
 
 	D3D11_BUFFER_DESC ibd = {};
 	ibd.Usage = D3D11_USAGE_DEFAULT;
-	ibd.ByteWidth = sizeof(WORD) * 6; // 2바이트(WORD) * 6개
+	ibd.ByteWidth = sizeof(WORD) * 36; // 2바이트(WORD) * 36개
 	ibd.BindFlags = D3D11_BIND_INDEX_BUFFER; // 인덱스 버퍼 용도
 	ibd.CPUAccessFlags = 0;
 
@@ -328,6 +365,9 @@ void Render()
 	float ClearColor[4] = { 0.0f, 0.125f, 0.6f, 1.0f };
 	g_pImmediateContext->ClearRenderTargetView(g_pRenderTargetView, ClearColor);
 
+	// 깊이 버퍼 지우기
+	g_pImmediateContext->ClearDepthStencilView(g_pDepthStencilView, D3D11_CLEAR_DEPTH, 1.0f, 0);
+
 	// 월드 행렬 업데이트 (회전)
 	// 시간에 따라 각도를 계속 증가
 	static float t = 0.0f;
@@ -363,8 +403,8 @@ void Render()
 	// 기존 코드 삭제
 	// g_pImmediateContext->Draw(3, 0);
 
-	// 총 6개의 인덱스(점)를 사용해서 그려라
-	g_pImmediateContext->DrawIndexed(6, 0, 0);
+	// 그리기 명령 (인덱스 36개)
+	g_pImmediateContext->DrawIndexed(36, 0, 0);
 
 	// 4. 화면 출력
 	g_pSwapChain->Present(0, 0);
@@ -383,6 +423,8 @@ void CleanupDevice()
 	if (g_pVertexLayout) g_pVertexLayout->Release();
 	if (g_pIndexBuffer) g_pIndexBuffer->Release();
 	if (g_pConstantBuffer) g_pConstantBuffer->Release();
+	if (g_pDepthStencil) g_pDepthStencil->Release();
+	if (g_pDepthStencilView) g_pDepthStencilView->Release();
 }
 
 // main
@@ -391,7 +433,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int)
 	// Create Window and assign(Basic Win32 API)
 	WNDCLASSEX wc = { sizeof(WNDCLASSEX), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(NULL), NULL, NULL, NULL, NULL, L"DX11Win", NULL };
 	RegisterClassEx(&wc);
-	HWND hWnd = CreateWindow(L"DX11Win", L"DirectX 11 Tutorial 04", WS_OVERLAPPEDWINDOW, 100, 100, 800, 600, NULL, NULL, wc.hInstance, NULL);
+	HWND hWnd = CreateWindow(L"DX11Win", L"DirectX 11 Tutorial 05", WS_OVERLAPPEDWINDOW, 100, 100, 800, 600, NULL, NULL, wc.hInstance, NULL);
 
 	//Init DirectX
 	if (FAILED(InitDevice(hWnd)))

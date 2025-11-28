@@ -35,3 +35,11 @@ DirectX 11 그래픽스 파이프라인의 기초부터 심화까지 단계별�
   <img src="./assets/images/chap04.gif" width="600">
 
 ---
+
+### Chapter 05: 3D 큐브 & 깊이 버퍼 (Depth Buffer)
+
+- **학습 내용**: 깊이 버퍼(Z-Buffer)의 원리, DepthStencilView 생성 및 바인딩, 큐브 메쉬 데이터 구성
+- **결과**: 깊이 테스트를 통해 앞뒤 관계가 명확한 3D 큐브 렌더링
+  <img src="./assets/images/chap05.gif" width="600">
+
+---
