@@ -31,11 +31,9 @@ XMMATRIX g_Projection;
 // 정점 구조체
 struct SimpleVertex
 {
-	// 위치 (x, y, z)
-	float x, y, z;
-
-	// 색상 (r, g, b, a)
-	float r, g, b, a;
+	XMFLOAT3 Pos;    // 위치
+	XMFLOAT3 Normal; // 법선 벡터 (표면이 바라보는 방향)
+	XMFLOAT4 Color;  // 색상
 };
 
 // 상수 버퍼 구조체 (CPU 쪽 정의)
@@ -44,6 +42,10 @@ struct ConstantBuffer
 	XMMATRIX mWorld; // 월드 행렬 (물체의 위치/회전)
 	XMMATRIX mView; // 뷰 행렬 (카메라의 위치)
 	XMMATRIX mProjection; // 프로젝션 행렬 (원근감)
+
+	// 조명 방향
+	// GPU는 16바이트 단위를 데이터로 읽으므로 XMFLOAT4 사용
+	XMFLOAT4 vLightDir;
 };
 
 std::wstring GetShaderPath()
@@ -153,10 +155,14 @@ HRESULT InitDevice(HWND hWnd)
 		// "POSITION"이라는 이름의 데이터는 -> float 3개(R32G32B32)로 되어 있고 -> 0번 슬롯에서 시작한다.
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 
-		// 2. 색상 정보
+		// 2. 법선
+		// 위치(12바이트) 바로 뒤
+		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+
+		// 3. 색상 정보
 		// "COLOR"라는 이름표를 달고, float4(128비트) 크기이며,
-		// 위치 데이터(12바이트)가 끝나는 지점(AlignedByteOffset)부터 시작한다.
-		{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		// 위치(12) + 법선(12) 데이터가 끝나는 지점(24바이트)부터 시작.
+		{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 	};
 	UINT numElements = ARRAYSIZE(layout);
 
@@ -223,24 +229,51 @@ HRESULT InitDevice(HWND hWnd)
 	// 3. 렌더 타겟과 깊이 버퍼를 파이프라인에 연결(기존 코드 수정)
 	g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView, g_pDepthStencilView);
 
-	// 1. 큐브 정점 (8개)
+	// 24개의 정점 (각 면마다 4개씩 분리, 법선 정보 포함)
 	SimpleVertex vertices[] =
 	{
-		{ -1.0f, 1.0f, -1.0f, 0.0f, 0.0f, 1.0f, 1.0f }, // 0. 좌상단 앞 (파랑)
-		{ 1.0f, 1.0f, -1.0f, 0.0f, 1.0f, 0.0f, 1.0f },  // 1. 우상단 앞 (초록)
-		{ 1.0f, 1.0f, 1.0f, 0.0f, 1.0f, 1.0f, 1.0f },   // 2. 우상단 뒤 (청록)
-		{ -1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f },  // 3. 좌상단 뒤 (빨강)
-		{ -1.0f, -1.0f, -1.0f, 1.0f, 0.0f, 1.0f, 1.0f },// 4. 좌하단 앞 (보라)
-		{ 1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 0.0f, 1.0f }, // 5. 우하단 앞 (노랑)
-		{ 1.0f, -1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f },  // 6. 우하단 뒤 (흰색)
-		{ -1.0f, -1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f }, // 7. 좌하단 뒤 (검정)
+		// 윗면 (Normal: 0, 1, 0) - 초록색 계열
+		{ XMFLOAT3(-1.0f, 1.0f, -1.0f), XMFLOAT3(0.0f, 1.0f, 0.0f), XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },
+		{ XMFLOAT3(1.0f, 1.0f, -1.0f), XMFLOAT3(0.0f, 1.0f, 0.0f), XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },
+		{ XMFLOAT3(1.0f, 1.0f,  1.0f), XMFLOAT3(0.0f, 1.0f, 0.0f), XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },
+		{ XMFLOAT3(-1.0f, 1.0f,  1.0f), XMFLOAT3(0.0f, 1.0f, 0.0f), XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },
+
+		// 아랫면 (Normal: 0, -1, 0) - 주황색 계열
+		{ XMFLOAT3(-1.0f, -1.0f, -1.0f), XMFLOAT3(0.0f, -1.0f, 0.0f), XMFLOAT4(1.0f, 0.5f, 0.0f, 1.0f) },
+		{ XMFLOAT3(1.0f, -1.0f, -1.0f), XMFLOAT3(0.0f, -1.0f, 0.0f), XMFLOAT4(1.0f, 0.5f, 0.0f, 1.0f) },
+		{ XMFLOAT3(1.0f, -1.0f,  1.0f), XMFLOAT3(0.0f, -1.0f, 0.0f), XMFLOAT4(1.0f, 0.5f, 0.0f, 1.0f) },
+		{ XMFLOAT3(-1.0f, -1.0f,  1.0f), XMFLOAT3(0.0f, -1.0f, 0.0f), XMFLOAT4(1.0f, 0.5f, 0.0f, 1.0f) },
+
+		// 앞면 (Normal: 0, 0, -1) - 빨간색 계열
+		{ XMFLOAT3(-1.0f, -1.0f, -1.0f), XMFLOAT3(0.0f, 0.0f, -1.0f), XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f) },
+		{ XMFLOAT3(1.0f, -1.0f, -1.0f), XMFLOAT3(0.0f, 0.0f, -1.0f), XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f) },
+		{ XMFLOAT3(1.0f,  1.0f, -1.0f), XMFLOAT3(0.0f, 0.0f, -1.0f), XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f) },
+		{ XMFLOAT3(-1.0f,  1.0f, -1.0f), XMFLOAT3(0.0f, 0.0f, -1.0f), XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f) },
+
+		// 뒷면 (Normal: 0, 0, 1) - 청록색 계열
+		{ XMFLOAT3(-1.0f, -1.0f, 1.0f), XMFLOAT3(0.0f, 0.0f, 1.0f), XMFLOAT4(0.0f, 1.0f, 1.0f, 1.0f) },
+		{ XMFLOAT3(1.0f, -1.0f, 1.0f), XMFLOAT3(0.0f, 0.0f, 1.0f), XMFLOAT4(0.0f, 1.0f, 1.0f, 1.0f) },
+		{ XMFLOAT3(1.0f,  1.0f, 1.0f), XMFLOAT3(0.0f, 0.0f, 1.0f), XMFLOAT4(0.0f, 1.0f, 1.0f, 1.0f) },
+		{ XMFLOAT3(-1.0f,  1.0f, 1.0f), XMFLOAT3(0.0f, 0.0f, 1.0f), XMFLOAT4(0.0f, 1.0f, 1.0f, 1.0f) },
+
+		// 왼쪽면 (Normal: -1, 0, 0) - 파란색 계열
+		{ XMFLOAT3(-1.0f, -1.0f,  1.0f), XMFLOAT3(-1.0f, 0.0f, 0.0f), XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f) },
+		{ XMFLOAT3(-1.0f, -1.0f, -1.0f), XMFLOAT3(-1.0f, 0.0f, 0.0f), XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f) },
+		{ XMFLOAT3(-1.0f,  1.0f, -1.0f), XMFLOAT3(-1.0f, 0.0f, 0.0f), XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f) },
+		{ XMFLOAT3(-1.0f,  1.0f,  1.0f), XMFLOAT3(-1.0f, 0.0f, 0.0f), XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f) },
+
+		// 오른쪽면 (Normal: 1, 0, 0) - 노란색 계열
+		{ XMFLOAT3(1.0f, -1.0f, -1.0f), XMFLOAT3(1.0f, 0.0f, 0.0f), XMFLOAT4(1.0f, 1.0f, 0.0f, 1.0f) },
+		{ XMFLOAT3(1.0f, -1.0f,  1.0f), XMFLOAT3(1.0f, 0.0f, 0.0f), XMFLOAT4(1.0f, 1.0f, 0.0f, 1.0f) },
+		{ XMFLOAT3(1.0f,  1.0f,  1.0f), XMFLOAT3(1.0f, 0.0f, 0.0f), XMFLOAT4(1.0f, 1.0f, 0.0f, 1.0f) },
+		{ XMFLOAT3(1.0f,  1.0f, -1.0f), XMFLOAT3(1.0f, 0.0f, 0.0f), XMFLOAT4(1.0f, 1.0f, 0.0f, 1.0f) },
 	};
 
 	// 정점 버퍼
 	// 1. 정점 버퍼 생성
 	D3D11_BUFFER_DESC bd = {};
 	bd.Usage = D3D11_USAGE_DEFAULT;
-	bd.ByteWidth = sizeof(vertices); // Buffer size
+	bd.ByteWidth = sizeof(SimpleVertex) * 24; // Buffer size
 	bd.BindFlags = D3D11_BIND_VERTEX_BUFFER; 
 	bd.CPUAccessFlags = 0;
 
@@ -268,16 +301,15 @@ HRESULT InitDevice(HWND hWnd)
 	// Topology 설정: 정점들을 이어 삼각형 리스트로 해석 (인덱스 버퍼가 이를 참조하여 사각형 구성)
 	g_pImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-	// 인덱스 버퍼
-	// 큐브 인덱스 (삼각형 12개 = 인덱스 36개)
+	// 24개 정점에 대한 인덱스 (각 면마다 0-1-2, 0-2-3 패턴)
 	WORD indices[] =
 	{
-		3,1,0, 2,1,3, // 윗면
-		0,5,4, 1,5,0, // 앞면
-		3,4,7, 0,4,3, // 왼쪽면
-		1,6,5, 2,6,1, // 오른쪽면
-		2,7,6, 3,7,2, // 뒷면
-		6,4,5, 7,4,6, // 아랫면
+		3,1,0, 2,1,3,      // 윗면
+		6,4,5, 7,4,6,      // 아랫면
+		11,9,8, 10,9,11,   // 앞면
+		14,12,13, 15,12,14,// 뒷면
+		19,17,16, 18,17,19,// 왼쪽면
+		22,20,21, 23,20,22 // 오른쪽면
 	};
 
 	D3D11_BUFFER_DESC ibd = {};
@@ -372,7 +404,7 @@ void Render()
 	// 시간에 따라 각도를 계속 증가
 	static float t = 0.0f;
 	if (g_pd3dDevice->GetFeatureLevel() == D3D_FEATURE_LEVEL_11_1)
-		t += 0.00f; // 좀 더 빠르게
+		t += 0.0001f; // 좀 더 빠르게
 	else
 		t += 0.0005f;
 
@@ -387,12 +419,17 @@ void Render()
 	cb.mWorld = XMMatrixTranspose(g_World);
 	cb.mView = XMMatrixTranspose(g_View);
 	cb.mProjection = XMMatrixTranspose(g_Projection);
+	// 빛이 비추는 방향
+	cb.vLightDir = XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f);
 
 	// GPU에 있는 상수 버퍼 메모리 갱신
 	g_pImmediateContext->UpdateSubresource(g_pConstantBuffer, 0, nullptr, &cb, 0, 0);
 
 	// 버텍스 쉐이더 단계에 상수 버퍼 연결 (슬롯 0번)
 	g_pImmediateContext->VSSetConstantBuffers(0, 1, &g_pConstantBuffer);
+
+	// 픽쉘 쉐이더에도 전달
+	g_pImmediateContext->PSSetConstantBuffers(0, 1, &g_pConstantBuffer);
 
 	// 쉐이더 장착 (버텍스 쉐이더, 픽셀 쉐이더)
 	g_pImmediateContext->VSSetShader(g_pVertexShader, nullptr, 0);
@@ -433,7 +470,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int)
 	// Create Window and assign(Basic Win32 API)
 	WNDCLASSEX wc = { sizeof(WNDCLASSEX), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(NULL), NULL, NULL, NULL, NULL, L"DX11Win", NULL };
 	RegisterClassEx(&wc);
-	HWND hWnd = CreateWindow(L"DX11Win", L"DirectX 11 Tutorial 05", WS_OVERLAPPEDWINDOW, 100, 100, 800, 600, NULL, NULL, wc.hInstance, NULL);
+	HWND hWnd = CreateWindow(L"DX11Win", L"DirectX 11 Tutorial 06", WS_OVERLAPPEDWINDOW, 100, 100, 800, 600, NULL, NULL, wc.hInstance, NULL);
 
 	//Init DirectX
 	if (FAILED(InitDevice(hWnd)))
